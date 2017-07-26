@@ -11,7 +11,11 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/tools/imports"
+
+	"bytes"
 	"github.com/pkg/errors"
+	"io"
 )
 
 func getAST(filename string) (*ast.File, error) {
@@ -27,6 +31,78 @@ func getAST(filename string) (*ast.File, error) {
 	return f, nil
 }
 
+func getReceiver(decl *ast.FuncDecl) (string, string) {
+	if len(decl.Recv.List) == 0 {
+		return "", ""
+	}
+	name := decl.Recv.List[0].Names[0].Name
+	typeStr := getType(decl.Recv.List[0].Type)
+	return name, fmt.Sprintf("(%s %s)", name, typeStr)
+}
+
+func getType(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.SelectorExpr:
+		return fmt.Sprintf("%s.%s", t.Sel.Name, getType(t.X))
+	case *ast.StarExpr:
+		return fmt.Sprintf("*%s", getType(t.X))
+	case *ast.Ident:
+		return t.Name
+	case *ast.ArrayType:
+		return fmt.Sprintf("[]%s", getType(t.Elt))
+	case *ast.MapType:
+		return fmt.Sprintf("[%s]%s", getType(t.Key), getType(t.Value))
+	default:
+		fmt.Printf("[DEBUG] expr = %#v\n", expr)
+		return ""
+	}
+}
+
+func getNames(fields []*ast.Field) []string {
+	names := []string{}
+	for _, field := range fields {
+		for _, name := range field.Names {
+			names = append(names, name.Name)
+		}
+	}
+	return names
+}
+
+func getSignature(fields []*ast.Field) string {
+	args := []string{}
+	for _, field := range fields {
+		arg := []string{}
+		for _, name := range field.Names {
+			arg = append(arg, name.Name)
+		}
+		argStr := strings.Join(arg, ", ")
+		if len(argStr) > 0 {
+			argStr += " "
+		}
+		args = append(args, fmt.Sprintf("%s%s", argStr, getType(field.Type)))
+	}
+	return strings.Join(args, ", ")
+}
+
+type GenSrc struct {
+	body *bytes.Buffer
+}
+
+func NewGenSrc(size int) *GenSrc {
+	buf := make([]byte, size)
+	return &GenSrc{
+		body: bytes.NewBuffer(buf),
+	}
+}
+
+func (g *GenSrc) Writer() io.Writer {
+	return g.body
+}
+
+func (g *GenSrc) Generate() ([]byte, error) {
+	return imports.Process("generated.go", g.body.Bytes(), nil)
+}
+
 func main() {
 	var fname string
 	flag.StringVar(&fname, "f", os.Getenv("GOFILE"), "parsing file")
@@ -36,6 +112,9 @@ func main() {
 	if err != nil {
 		log.Fatal(fmt.Errorf("getAST failed %s", err))
 	}
+
+	g := NewGenSrc(2048)
+	w := g.Writer()
 
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -50,30 +129,26 @@ func main() {
 			continue
 		}
 
-		rname := fn.Recv.List[0].Names[0].Name
-		r := ""
-		switch recvType := fn.Recv.List[0].Type.(type) {
-		case *ast.StarExpr:
-			r = fmt.Sprintf("(%s *%s)", rname, recvType.X)
-		}
+		fnName := strings.TrimSuffix(name, "WithContext")
+		recVar, recStr := getReceiver(fn)
+		args := getSignature(fn.Type.Params.List[1:])
+		results := getSignature(fn.Type.Results.List)
+		names := getNames(fn.Type.Params.List[1:])
+		names = append([]string{"context.Background()"}, names...)
 
-		fmt.Printf("func %s %s(", r, fn.Name)
-
-		args := []string{}
-		for _, field := range fn.Type.Params.List[1:] {
-			arg := []string{}
-			for _, name := range field.Names {
-				arg = append(arg, name.Name)
-			}
-			t := ""
-			switch argType := field.Type.(type) {
-			case *ast.SelectorExpr:
-				t = fmt.Sprintf("%s.%s", argType.X, argType.Sel)
-			case *ast.Ident:
-				t = fmt.Sprintf("%s", argType.Name)
-			}
-			args = append(args, strings.Join(arg, ",")+" "+t)
+		if len(recVar) > 0 {
+			name = recVar + "." + name
 		}
-		fmt.Printf("%s)\n", strings.Join(args, ", "))
+		if len(results) > 0 {
+			results = "(" + results + ")"
+		}
+		fmt.Fprintf(w, "func %s %s(%s) %s {\r\n", recStr, fnName, args, results)
+		fmt.Fprintf(w, "\treturn %s(%s)\r\n", name, strings.Join(names, ", "))
+		fmt.Fprintln(w, "}")
 	}
+	out, err := g.Generate()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(string(out))
 }
