@@ -1,21 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"strings"
 
-	"golang.org/x/tools/imports"
-
-	"bytes"
 	"github.com/pkg/errors"
-	"io"
+	"golang.org/x/tools/imports"
 )
 
 func getAST(filename string) (*ast.File, error) {
@@ -88,10 +88,9 @@ type GenSrc struct {
 	body *bytes.Buffer
 }
 
-func NewGenSrc(size int) *GenSrc {
-	buf := make([]byte, size)
+func NewGenSrc() *GenSrc {
 	return &GenSrc{
-		body: bytes.NewBuffer(buf),
+		body: &bytes.Buffer{},
 	}
 }
 
@@ -104,51 +103,105 @@ func (g *GenSrc) Generate() ([]byte, error) {
 }
 
 func main() {
+	defaultFile := os.Getenv("GOFILE")
 	var fname string
-	flag.StringVar(&fname, "f", os.Getenv("GOFILE"), "parsing file")
+	flag.StringVar(&fname, "f", defaultFile, "target file")
+	flag.StringVar(&fname, "file", defaultFile, "target file")
+
+	var dname string
+	flag.StringVar(&dname, "d", "", "target directory")
+	flag.StringVar(&dname, "dir", "", "target directory")
+
+	var oname string
+	flag.StringVar(&oname, "o", "", "output filename")
+	flag.StringVar(&oname, "out", "", "output filename")
+
 	flag.Parse()
 
-	f, err := getAST(fname)
-	if err != nil {
-		log.Fatal(fmt.Errorf("getAST failed %s", err))
+	if len(fname) == 0 && len(dname) == 0 {
+		flag.Usage()
+		log.Fatal("require -f or -d")
+	}
+	if len(fname) > 0 && len(dname) > 0 {
+		flag.Usage()
+		log.Fatal("either -f or -d, not both")
 	}
 
-	g := NewGenSrc(2048)
+	filenames := make([]string, 0)
+	if len(fname) > 0 {
+		filenames = append(filenames, fname)
+	} else {
+		infos, err := ioutil.ReadDir(dname)
+		if err != nil {
+			log.Fatalf("read dir failed: %s", err)
+		}
+		for _, info := range infos {
+			name := info.Name()
+			if !strings.HasSuffix(name, ".go") {
+				continue
+			}
+			filenames = append(filenames, path.Join(dname, name))
+		}
+	}
+
+	var oWriter io.Writer
+	if len(oname) == 0 {
+		oWriter = os.Stdout
+	} else {
+		oWriter, err := os.Create(oname)
+		if err != nil {
+			log.Fatalf("create file failed: %s", err)
+		}
+		defer oWriter.Close()
+	}
+
+	g := NewGenSrc()
 	w := g.Writer()
-
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		name := fn.Name.String()
-		if !('A' <= name[0] && name[0] <= 'Z') {
-			continue
-		}
-		if !strings.HasSuffix(name, "WithContext") {
-			continue
+	for i, filename := range filenames {
+		f, err := getAST(filename)
+		if err != nil {
+			log.Fatalf("getAST failed %s", err)
 		}
 
-		fnName := strings.TrimSuffix(name, "WithContext")
-		recVar, recStr := getReceiver(fn)
-		args := getSignature(fn.Type.Params.List[1:])
-		results := getSignature(fn.Type.Results.List)
-		names := getNames(fn.Type.Params.List[1:])
-		names = append([]string{"context.Background()"}, names...)
+		if i == 0 {
+			fmt.Fprintf(w, "package %s\n", f.Name.Name)
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			name := fn.Name.String()
+			if !('A' <= name[0] && name[0] <= 'Z') {
+				continue
+			}
+			if !strings.HasSuffix(name, "WithContext") {
+				continue
+			}
 
-		if len(recVar) > 0 {
-			name = recVar + "." + name
+			fnName := strings.TrimSuffix(name, "WithContext")
+			recVar, recStr := getReceiver(fn)
+			args := getSignature(fn.Type.Params.List[1:])
+			results := getSignature(fn.Type.Results.List)
+			names := getNames(fn.Type.Params.List[1:])
+			names = append([]string{"context.Background()"}, names...)
+
+			if len(recVar) > 0 {
+				name = recVar + "." + name
+			}
+			if len(results) > 0 {
+				results = "(" + results + ")"
+			}
+			fmt.Fprintf(w, "func %s %s(%s) %s {\r\n", recStr, fnName, args, results)
+			fmt.Fprintf(w, "\treturn %s(%s)\r\n", name, strings.Join(names, ", "))
+			fmt.Fprintln(w, "}")
 		}
-		if len(results) > 0 {
-			results = "(" + results + ")"
-		}
-		fmt.Fprintf(w, "func %s %s(%s) %s {\r\n", recStr, fnName, args, results)
-		fmt.Fprintf(w, "\treturn %s(%s)\r\n", name, strings.Join(names, ", "))
-		fmt.Fprintln(w, "}")
 	}
 	out, err := g.Generate()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("generate failed: %s", err)
 	}
-	fmt.Println(string(out))
+	if _, err := oWriter.Write(out); err != nil {
+		log.Fatalf("write failed: %s", err)
+	}
 }
