@@ -148,11 +148,12 @@ func main() {
 	if len(oname) == 0 {
 		oWriter = os.Stdout
 	} else {
-		oWriter, err := os.Create(oname)
+		f, err := os.Create(oname)
 		if err != nil {
 			log.Fatalf("create file failed: %s", err)
 		}
-		defer oWriter.Close()
+		defer f.Close()
+		oWriter = f
 	}
 
 	g := NewGenSrc()
