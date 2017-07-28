@@ -159,6 +159,9 @@ func main() {
 	g := NewGenSrc()
 	w := g.Writer()
 	for i, filename := range filenames {
+		if filename == oname {
+			continue
+		}
 		f, err := getAST(filename)
 		if err != nil {
 			log.Fatalf("getAST failed %s", err)
