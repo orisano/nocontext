@@ -43,7 +43,7 @@ func getReceiver(decl *ast.FuncDecl) (string, string) {
 func getType(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.SelectorExpr:
-		return fmt.Sprintf("%s.%s", t.Sel.Name, getType(t.X))
+		return fmt.Sprintf("%s.%s", getType(t.X), t.Sel.Name)
 	case *ast.StarExpr:
 		return fmt.Sprintf("*%s", getType(t.X))
 	case *ast.Ident:
