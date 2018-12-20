@@ -96,7 +96,7 @@ func run() error {
 			fdecl.Type.Params.List = fdecl.Type.Params.List[1:]
 
 			var fun ast.Expr
-			if len(fdecl.Recv.List) > 0 {
+			if fdecl.Recv != nil {
 				fun = &ast.SelectorExpr{X: ast.NewIdent(fdecl.Recv.List[0].Names[0].Name), Sel: ast.NewIdent(name)}
 			} else {
 				fun = ast.NewIdent(name)
@@ -118,7 +118,7 @@ func run() error {
 				}
 			}
 
-			if len(fdecl.Type.Results.List) > 0 {
+			if fdecl.Type.Results != nil {
 				fdecl.Body.List = []ast.Stmt{
 					&ast.ReturnStmt{
 						Results: []ast.Expr{callExpr},
