@@ -1,2 +1,13 @@
 # nocontext
-第一引数にcontext.Contextを取る関数でWithContextと関数名の最後についてる関数の常時context.Background()を渡す版を生成するツールです.
+nocotext is a code generator, that generates function with context.
+
+## Installation
+```
+go get github.com/orisano/nocontext
+```
+
+## Author
+Nao YONASHIRO(@orisano)
+
+## License
+MIT
