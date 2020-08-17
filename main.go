@@ -139,6 +139,8 @@ func run() error {
 }
 
 func main() {
+	log.SetFlags(0)
+	log.SetPrefix("nocontext: ")
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
