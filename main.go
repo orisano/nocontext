@@ -13,14 +13,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"golang.org/x/xerrors"
 )
 
 func parseFile(path string) (*ast.File, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, xerrors.Errorf("open file: %w", err)
+		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 	return parser.ParseFile(token.NewFileSet(), path, f, 0)
@@ -35,11 +33,11 @@ func run() error {
 
 	if *fileName == "" && *dirName == "" {
 		flag.Usage()
-		return xerrors.New("require -f or -d")
+		return fmt.Errorf("require -f or -d")
 	}
 	if *fileName != "" && *dirName != "" {
 		flag.Usage()
-		return xerrors.New("either -f or -d, not both")
+		return fmt.Errorf("either -f or -d, not both")
 	}
 
 	var fileNames []string
@@ -49,7 +47,7 @@ func run() error {
 	case *dirName != "":
 		infoList, err := ioutil.ReadDir(*dirName)
 		if err != nil {
-			return xerrors.Errorf("read dir: %w", err)
+			return fmt.Errorf("read dir: %w", err)
 		}
 		for _, info := range infoList {
 			name := info.Name()
@@ -64,7 +62,7 @@ func run() error {
 	if *outputName != "" {
 		f, err := os.Create(*outputName)
 		if err != nil {
-			return xerrors.Errorf("create file: %w", err)
+			return fmt.Errorf("create file: %w", err)
 		}
 		defer f.Close()
 		w = f
